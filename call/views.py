@@ -30,8 +30,7 @@ client = Client(
     os.getenv('TWILIO_AUTH_TOKEN')
 )
 
-# Public URL for webhooks - Replace this with your actual public URL
-PUBLIC_URL = "https://call-1-u39m.onrender.com"  # Update this with your Render URL
+# Public URL for webhooks - Now using settings.PUBLIC_URL instead of hardcoded value
 
 def format_phone_number(phone_number):
     """Format phone number to E.164 format"""
