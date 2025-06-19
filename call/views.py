@@ -116,6 +116,7 @@ def answer(request):
         
         # Get call details
         call = client.calls(call_sid).fetch()
+        logger.info(f"Call details retrieved: {call.status}")
         
         # Define the sequence of questions
         questions = [
@@ -129,12 +130,17 @@ def answer(request):
         question = questions[0]
         
         # Create a new response record
-        response = CallResponse.objects.create(
-            phone_number=phone_number,
-            call_sid=call_sid,
-            question=question,
-            call_status='in-progress'
-        )
+        try:
+            response = CallResponse.objects.create(
+                phone_number=phone_number,
+                call_sid=call_sid,
+                question=question,
+                call_status='in-progress'
+            )
+            logger.info(f"Created CallResponse record with ID: {response.id}")
+        except Exception as db_error:
+            logger.error(f"Database error creating CallResponse: {str(db_error)}")
+            raise db_error
         
         # Create TwiML response
         resp = VoiceResponse()
@@ -149,8 +155,10 @@ def answer(request):
         resp.pause(length=1)
         
         # Record the response
+        record_action = f'{settings.PUBLIC_URL}/voice/?response_id={response.id}'
+        logger.info(f"Recording action URL: {record_action}")
         resp.record(
-            action=f'{settings.PUBLIC_URL}/voice/?response_id={response.id}',
+            action=record_action,
             maxLength='30',
             playBeep=False,
             trim='trim-silence'
@@ -251,13 +259,15 @@ def recording_status(request):
             "Why do you want to join our company?"
         ]
         
-        # Count how many responses we already have for this call
-        existing_responses = CallResponse.objects.filter(call_sid=call_sid).count()
-        current_index = existing_responses - 1  # Subtract 1 because we just updated one
+        # Count how many question responses we already have for this call (excluding "Call initiated")
+        existing_responses = CallResponse.objects.filter(
+            call_sid=call_sid,
+            question__in=questions
+        ).count()
         
-        if current_index < len(questions):
+        if existing_responses < len(questions):
             # Ask the next question
-            resp.say(questions[current_index], voice='Polly.Amy')
+            resp.say(questions[existing_responses], voice='Polly.Amy')
             resp.record(
                 action=f'{settings.PUBLIC_URL}/voice/?response_id={response.id}',
                 maxLength='30',
@@ -506,21 +516,23 @@ def voice(request):
             "Why do you want to join our company?"
         ]
         
-        # Count how many responses we already have for this call
-        existing_responses = CallResponse.objects.filter(call_sid=call_sid).count()
-        current_index = existing_responses - 1  # Subtract 1 because we just created one
+        # Count how many question responses we already have for this call (excluding "Call initiated")
+        existing_responses = CallResponse.objects.filter(
+            call_sid=call_sid,
+            question__in=questions
+        ).count()
         
         # Create response object
         resp = VoiceResponse()
         
         # Check if we have more questions to ask
-        if current_index < len(questions):
+        if existing_responses < len(questions):
             # Get the current question
-            question = questions[current_index]
+            question = questions[existing_responses]
             
             # Create a new CallResponse record
             response = CallResponse.objects.create(
-                phone_number=call.to,
+                phone_number=call.to_formatted if hasattr(call, 'to_formatted') else call.to,
                 call_sid=call_sid,
                 question=question,
                 call_status='in-progress'
@@ -543,7 +555,7 @@ def voice(request):
                 trim='trim-silence'
             )
             
-            logger.info(f"Generated TwiML for next question {current_index + 1} for call {call_sid}")
+            logger.info(f"Generated TwiML for question {existing_responses + 1} for call {call_sid}")
             
         else:
             # All questions have been asked
