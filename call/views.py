@@ -67,9 +67,6 @@ def make_call(request):
         # Create Twilio client
         client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
         
-        # Reset session for new call
-        request.session['current_question_index'] = 0
-        
         # Create webhook URL using settings
         webhook_url = f"{settings.PUBLIC_URL}/answer/"
         
@@ -128,10 +125,6 @@ def answer(request):
             "Why do you want to join our company?"
         ]
         
-        # Reset session for new call
-        request.session['questions'] = questions
-        request.session['current_question_index'] = 0
-        
         # Get the first question
         question = questions[0]
         
@@ -142,9 +135,6 @@ def answer(request):
             question=question,
             call_status='in-progress'
         )
-        
-        # Store the response ID in the session
-        request.session['response_id'] = response.id
         
         # Create TwiML response
         resp = VoiceResponse()
@@ -253,8 +243,7 @@ def recording_status(request):
         # Create a new VoiceResponse for the next question
         resp = VoiceResponse()
         
-        # Check if we have more questions to ask
-        current_index = request.session.get('current_question_index', 0)
+        # Define questions
         questions = [
             "Hi, please tell us your full name.",
             "What is your work experience?",
@@ -262,11 +251,15 @@ def recording_status(request):
             "Why do you want to join our company?"
         ]
         
+        # Count how many responses we already have for this call
+        existing_responses = CallResponse.objects.filter(call_sid=call_sid).count()
+        current_index = existing_responses - 1  # Subtract 1 because we just updated one
+        
         if current_index < len(questions):
             # Ask the next question
             resp.say(questions[current_index], voice='Polly.Amy')
             resp.record(
-                action=f'/recording_status/?response_id={response.id}',
+                action=f'{settings.PUBLIC_URL}/voice/?response_id={response.id}',
                 maxLength='30',
                 playBeep=False
             )
@@ -276,11 +269,6 @@ def recording_status(request):
             
             # Update all responses for this call to completed
             CallResponse.objects.filter(call_sid=call_sid).update(call_status='completed')
-            
-            # Reset the session
-            request.session['current_question_index'] = 0
-            if 'response_id' in request.session:
-                del request.session['response_id']
 
         return HttpResponse(str(resp))
         
@@ -510,16 +498,17 @@ def voice(request):
             except CallResponse.DoesNotExist:
                 logger.error(f"Response not found: {response_id}")
         
-        # Get questions from session or use default
-        questions = request.session.get('questions', [
+        # Define questions
+        questions = [
             "Hi, please tell us your full name.",
             "What is your work experience?",
             "What was your previous job role?",
             "Why do you want to join our company?"
-        ])
+        ]
         
-        # Get current question index from session or initialize to 0
-        current_index = request.session.get('current_question_index', 0)
+        # Count how many responses we already have for this call
+        existing_responses = CallResponse.objects.filter(call_sid=call_sid).count()
+        current_index = existing_responses - 1  # Subtract 1 because we just created one
         
         # Create response object
         resp = VoiceResponse()
@@ -536,9 +525,6 @@ def voice(request):
                 question=question,
                 call_status='in-progress'
             )
-            
-            # Store the response ID in the session
-            request.session['response_id'] = response.id
             
             # Add a pause before asking the question
             resp.pause(length=1)
@@ -557,9 +543,6 @@ def voice(request):
                 trim='trim-silence'
             )
             
-            # Increment the question index for next time
-            request.session['current_question_index'] = current_index + 1
-            
             logger.info(f"Generated TwiML for next question {current_index + 1} for call {call_sid}")
             
         else:
@@ -568,13 +551,6 @@ def voice(request):
             
             # Update all responses for this call to completed
             CallResponse.objects.filter(call_sid=call_sid).update(call_status='completed')
-            
-            # Reset the session
-            request.session['current_question_index'] = 0
-            if 'response_id' in request.session:
-                del request.session['response_id']
-            if 'questions' in request.session:
-                del request.session['questions']
             
             logger.info(f"Call {call_sid} completed successfully")
         
