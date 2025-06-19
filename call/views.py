@@ -128,6 +128,7 @@ def answer(request):
         
         # Get the first question
         question = questions[0]
+        logger.info(f"Starting with first question: {question}")
         
         # Create a new response record
         try:
@@ -480,10 +481,12 @@ def voice(request):
         
         # Get call details
         call = client.calls(call_sid).fetch()
+        logger.info(f"Call status: {call.status}")
         
         # Get the recording SID from the request
         recording_sid = request.POST.get('RecordingSid')
         if recording_sid:
+            logger.info(f"Processing recording: {recording_sid}")
             # Update the previous response with recording details
             try:
                 response = CallResponse.objects.get(id=response_id)
@@ -492,6 +495,7 @@ def voice(request):
                 response.recording_url = recording.uri
                 response.recording_duration = recording.duration
                 response.save()
+                logger.info(f"Updated response {response_id} with recording details")
 
                 # Try to get the transcript
                 try:
@@ -499,8 +503,10 @@ def voice(request):
                     if transcript:
                         response.transcript = transcript[0].transcription_text
                         response.transcript_status = 'completed'
+                        logger.info(f"Transcript obtained: {response.transcript[:50]}...")
                     else:
                         response.transcript_status = 'pending'
+                        logger.info("No transcript available yet")
                 except Exception as e:
                     logger.error(f"Error fetching transcript: {str(e)}")
                     response.transcript_status = 'failed'
@@ -516,11 +522,13 @@ def voice(request):
             "Why do you want to join our company?"
         ]
         
-        # Count how many question responses we already have for this call (excluding "Call initiated")
+        # Count how many question responses we already have for this call
         existing_responses = CallResponse.objects.filter(
             call_sid=call_sid,
             question__in=questions
         ).count()
+        
+        logger.info(f"Existing responses for call {call_sid}: {existing_responses}")
         
         # Create response object
         resp = VoiceResponse()
@@ -529,14 +537,26 @@ def voice(request):
         if existing_responses < len(questions):
             # Get the current question
             question = questions[existing_responses]
+            logger.info(f"Asking question {existing_responses + 1}: {question}")
+            
+            # Get phone number safely
+            try:
+                phone_number = call.to_formatted if hasattr(call, 'to_formatted') else call.to
+            except:
+                phone_number = call.to if hasattr(call, 'to') else 'Unknown'
             
             # Create a new CallResponse record
-            response = CallResponse.objects.create(
-                phone_number=call.to_formatted if hasattr(call, 'to_formatted') else call.to,
-                call_sid=call_sid,
-                question=question,
-                call_status='in-progress'
-            )
+            try:
+                response = CallResponse.objects.create(
+                    phone_number=phone_number,
+                    call_sid=call_sid,
+                    question=question,
+                    call_status='in-progress'
+                )
+                logger.info(f"Created new CallResponse with ID: {response.id}")
+            except Exception as db_error:
+                logger.error(f"Database error creating CallResponse: {str(db_error)}")
+                raise db_error
             
             # Add a pause before asking the question
             resp.pause(length=1)
@@ -548,8 +568,10 @@ def voice(request):
             resp.pause(length=1)
             
             # Record the response
+            record_action = f'{settings.PUBLIC_URL}/voice/?response_id={response.id}'
+            logger.info(f"Recording action URL: {record_action}")
             resp.record(
-                action=f'{settings.PUBLIC_URL}/voice/?response_id={response.id}',
+                action=record_action,
                 maxLength='30',
                 playBeep=False,
                 trim='trim-silence'
@@ -559,6 +581,7 @@ def voice(request):
             
         else:
             # All questions have been asked
+            logger.info(f"All questions completed for call {call_sid}")
             resp.say("Thank you for your time. We will review your responses and get back to you soon.", voice='Polly.Amy')
             
             # Update all responses for this call to completed
