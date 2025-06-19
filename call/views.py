@@ -264,35 +264,106 @@ def recording_status(request):
 def dashboard(request):
     """Display dashboard with all responses"""
     try:
+        logger.info("Dashboard view accessed")
+        
+        # Test database connection first
+        try:
+            from django.db import connection
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT 1")
+                logger.info("Database connection test successful")
+        except Exception as db_conn_error:
+            logger.error(f"Database connection failed: {db_conn_error}")
+            messages.error(request, f"Database connection error: {db_conn_error}")
+            return render(request, 'call/dashboard.html', {
+                'responses': [],
+                'total_responses': 0,
+                'total_recordings': 0,
+                'total_transcripts': 0,
+                'responses_by_call': {},
+                'transcript_stats': {'completed': 0, 'pending': 0, 'failed': 0},
+                'error': f"Database connection failed: {db_conn_error}"
+            })
+        
+        # Test if CallResponse table exists
+        try:
+            with connection.cursor() as cursor:
+                if 'sqlite' in settings.DATABASES['default']['ENGINE'].lower():
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='call_callresponse'")
+                else:
+                    cursor.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename='call_callresponse'")
+                
+                if not cursor.fetchone():
+                    logger.error("call_callresponse table does not exist")
+                    messages.error(request, "Database table 'call_callresponse' does not exist. Please run migrations.")
+                    return render(request, 'call/dashboard.html', {
+                        'responses': [],
+                        'total_responses': 0,
+                        'total_recordings': 0,
+                        'total_transcripts': 0,
+                        'responses_by_call': {},
+                        'transcript_stats': {'completed': 0, 'pending': 0, 'failed': 0},
+                        'error': "Database table 'call_callresponse' does not exist. Please run migrations."
+                    })
+                else:
+                    logger.info("call_callresponse table exists")
+        except Exception as table_check_error:
+            logger.error(f"Error checking table existence: {table_check_error}")
+            messages.error(request, f"Error checking database table: {table_check_error}")
+        
         # Get all responses ordered by creation date
-        responses = CallResponse.objects.all().order_by('-created_at')
+        try:
+            responses = CallResponse.objects.all().order_by('-created_at')
+            logger.info(f"Successfully queried {responses.count()} responses")
+        except Exception as query_error:
+            logger.error(f"Error querying CallResponse: {query_error}")
+            messages.error(request, f"Error loading responses: {query_error}")
+            return render(request, 'call/dashboard.html', {
+                'responses': [],
+                'total_responses': 0,
+                'total_recordings': 0,
+                'total_transcripts': 0,
+                'responses_by_call': {},
+                'transcript_stats': {'completed': 0, 'pending': 0, 'failed': 0},
+                'error': f"Error loading responses: {query_error}"
+            })
         
         # Get transcript statistics
-        transcript_stats = {
-            'completed': responses.filter(transcript_status='completed').count(),
-            'pending': responses.filter(transcript_status='pending').count(),
-            'failed': responses.filter(transcript_status='failed').count()
-        }
+        try:
+            transcript_stats = {
+                'completed': responses.filter(transcript_status='completed').count(),
+                'pending': responses.filter(transcript_status='pending').count(),
+                'failed': responses.filter(transcript_status='failed').count()
+            }
+            logger.info(f"Transcript stats: {transcript_stats}")
+        except Exception as stats_error:
+            logger.error(f"Error calculating transcript stats: {stats_error}")
+            transcript_stats = {'completed': 0, 'pending': 0, 'failed': 0}
         
         # Group responses by phone number and call
-        responses_by_call = {}
-        for response in responses:
-            if response.call_sid not in responses_by_call:
-                responses_by_call[response.call_sid] = {
-                    'phone_number': response.phone_number,
-                    'call_status': response.call_status,
-                    'call_duration': response.call_duration,
-                    'created_at': response.created_at,
-                    'responses': []
-                }
-            responses_by_call[response.call_sid]['responses'].append({
-                'question': response.question,
-                'recording_url': response.recording_url,
-                'recording_duration': response.recording_duration,
-                'transcript': response.transcript,
-                'transcript_status': response.transcript_status,
-                'created_at': response.created_at
-            })
+        try:
+            responses_by_call = {}
+            for response in responses:
+                if response.call_sid not in responses_by_call:
+                    responses_by_call[response.call_sid] = {
+                        'phone_number': response.phone_number,
+                        'call_status': response.call_status,
+                        'call_duration': response.call_duration,
+                        'created_at': response.created_at,
+                        'responses': []
+                    }
+                responses_by_call[response.call_sid]['responses'].append({
+                    'question': response.question,
+                    'recording_url': response.recording_url,
+                    'recording_duration': response.recording_duration,
+                    'transcript': response.transcript,
+                    'transcript_status': response.transcript_status,
+                    'created_at': response.created_at
+                })
+            logger.info(f"Grouped responses into {len(responses_by_call)} calls")
+        except Exception as grouping_error:
+            logger.error(f"Error grouping responses: {grouping_error}")
+            responses_by_call = {}
         
         context = {
             'responses': responses,
@@ -303,6 +374,7 @@ def dashboard(request):
             'transcript_stats': transcript_stats
         }
         
+        logger.info("Dashboard context prepared successfully")
         return render(request, 'call/dashboard.html', context)
         
     except Exception as e:
@@ -314,7 +386,8 @@ def dashboard(request):
             'total_recordings': 0,
             'total_transcripts': 0,
             'responses_by_call': {},
-            'transcript_stats': {'completed': 0, 'pending': 0, 'failed': 0}
+            'transcript_stats': {'completed': 0, 'pending': 0, 'failed': 0},
+            'error': f"Dashboard error: {str(e)}"
         })
 
 def index(request):

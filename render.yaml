@@ -4,8 +4,8 @@ services:
     env: python
     buildCommand: |
       pip install -r requirements.txt
-      echo "=== Comprehensive Database Verification ==="
-      python verify_database.py
+      echo "=== Comprehensive Database Debugging ==="
+      python debug_database.py
       echo "=== Migration Status ==="
       python manage.py showmigrations
       echo "=== Build Complete ==="
