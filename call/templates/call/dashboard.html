@@ -4,6 +4,17 @@
 <div class="container mt-4">
     <h1>Call Dashboard</h1>
     
+    <!-- Database Status Alert -->
+    {% if not database_available %}
+    <div class="alert alert-warning alert-dismissible fade show" role="alert">
+        <strong>Database Unavailable:</strong> The database is currently not accessible. Call functionality will work, but responses won't be stored. 
+        {% if database_error %}
+        <br><small>Error: {{ database_error }}</small>
+        {% endif %}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+    {% endif %}
+    
     <!-- Messages/Alerts -->
     {% if messages %}
     <div class="messages mb-4">
@@ -39,76 +50,40 @@
     
     <!-- Statistics Section -->
     <div class="row mb-4">
-        <div class="col-md-3">
+        <div class="col-md-4">
             <div class="card">
                 <div class="card-body">
-                    <h5 class="card-title">Total Responses</h5>
-                    <p class="card-text display-4">{{ total_responses }}</p>
+                    <h5 class="card-title">Total Calls</h5>
+                    <p class="card-text display-4">{{ total_calls }}</p>
                 </div>
             </div>
         </div>
-        <div class="col-md-3">
+        <div class="col-md-4">
             <div class="card">
                 <div class="card-body">
-                    <h5 class="card-title">Total Recordings</h5>
-                    <p class="card-text display-4">{{ total_recordings }}</p>
+                    <h5 class="card-title">Completed Calls</h5>
+                    <p class="card-text display-4">{{ completed_calls }}</p>
                 </div>
             </div>
         </div>
-        <div class="col-md-3">
+        <div class="col-md-4">
             <div class="card">
                 <div class="card-body">
-                    <h5 class="card-title">Total Transcripts</h5>
-                    <p class="card-text display-4">{{ total_transcripts }}</p>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-3">
-            <div class="card">
-                <div class="card-body">
-                    <h5 class="card-title">Export Data</h5>
-                    <a href="{% url 'export_excel' %}" class="btn btn-primary">
-                        <i class="fas fa-file-excel me-2"></i>Download Excel
-                    </a>
+                    <h5 class="card-title">In Progress Calls</h5>
+                    <p class="card-text display-4">{{ in_progress_calls }}</p>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Transcript Status Section -->
-    <div class="row mb-4">
-        <div class="col-md-4">
-            <div class="card bg-success text-white">
-                <div class="card-body">
-                    <h5 class="card-title">Completed Transcripts</h5>
-                    <p class="card-text display-4">{{ transcript_stats.completed }}</p>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-4">
-            <div class="card bg-warning text-dark">
-                <div class="card-body">
-                    <h5 class="card-title">Pending Transcripts</h5>
-                    <p class="card-text display-4">{{ transcript_stats.pending }}</p>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-4">
-            <div class="card bg-danger text-white">
-                <div class="card-body">
-                    <h5 class="card-title">Failed Transcripts</h5>
-                    <p class="card-text display-4">{{ transcript_stats.failed }}</p>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Responses Table -->
+    <!-- Call Responses Table -->
+    {% if database_available %}
     <div class="card mb-4">
         <div class="card-header">
-            <h5 class="mb-0">All Responses</h5>
+            <h5 class="mb-0">Call Responses</h5>
         </div>
         <div class="card-body">
+            {% if call_responses %}
             <div class="table-responsive">
                 <table class="table table-striped">
                     <thead>
@@ -118,13 +93,11 @@
                             <th>Call Status</th>
                             <th>Recording</th>
                             <th>Duration</th>
-                            <th>Transcript</th>
-                            <th>Status</th>
                             <th>Created At</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {% for response in responses %}
+                        {% for response in call_responses %}
                         <tr>
                             <td>{{ response.phone_number }}</td>
                             <td>{{ response.question|default:"N/A" }}</td>
@@ -144,55 +117,37 @@
                                 {% endif %}
                             </td>
                             <td>{{ response.recording_duration|default:"N/A" }}s</td>
-                            <td>
-                                {% if response.transcript %}
-                                <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#transcriptModal{{ response.id }}">
-                                    View Transcript
-                                </button>
-                                {% else %}
-                                {{ response.transcript_status }}
-                                {% endif %}
-                            </td>
-                            <td>
-                                <span class="badge {% if response.transcript_status == 'completed' %}bg-success{% elif response.transcript_status == 'pending' %}bg-warning{% else %}bg-danger{% endif %}">
-                                    {{ response.transcript_status }}
-                                </span>
-                            </td>
                             <td>{{ response.created_at|date:"Y-m-d H:i:s" }}</td>
                         </tr>
-
-                        <!-- Transcript Modal -->
-                        {% if response.transcript %}
-                        <div class="modal fade" id="transcriptModal{{ response.id }}" tabindex="-1">
-                            <div class="modal-dialog modal-lg">
-                                <div class="modal-content">
-                                    <div class="modal-header">
-                                        <h5 class="modal-title">Transcript for {{ response.phone_number }}</h5>
-                                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                                    </div>
-                                    <div class="modal-body">
-                                        <p>{{ response.transcript }}</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        {% endif %}
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
+            {% else %}
+            <div class="text-center py-4">
+                <p class="text-muted">No call responses recorded yet.</p>
+            </div>
+            {% endif %}
         </div>
     </div>
+    {% else %}
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">Call Responses</h5>
+        </div>
+        <div class="card-body">
+            <div class="text-center py-4">
+                <p class="text-muted">Database is not available. Call responses cannot be displayed.</p>
+                <p class="text-muted">The call functionality will still work, but responses won't be stored.</p>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 </div>
 
 <style>
 .audio-controls {
     width: 200px;
-}
-
-.modal-body {
-    max-height: 400px;
-    overflow-y: auto;
 }
 </style>
 {% endblock %} 

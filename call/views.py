@@ -51,49 +51,55 @@ def format_phone_number(phone_number):
 @csrf_exempt
 @require_http_methods(["POST"])
 def make_call(request):
-    try:
-        phone_number = request.POST.get('phone_number')
-        if not phone_number:
-            messages.error(request, "Phone number is required")
-            return redirect('dashboard')
-
-        # Format phone number for India
-        if not phone_number.startswith('+'):
-            if phone_number.startswith('0'):
-                phone_number = '+91' + phone_number[1:]
-            else:
-                phone_number = '+91' + phone_number
-
-        # Create Twilio client
-        client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+    """Make a call using Twilio"""
+    if request.method == 'POST':
+        try:
+            phone_number = request.POST.get('phone_number')
+            if not phone_number:
+                messages.error(request, 'Phone number is required')
+                return redirect('dashboard')
+            
+            # Validate phone number format
+            if not phone_number.startswith('91') or len(phone_number) != 12:
+                messages.error(request, 'Please enter a valid Indian phone number starting with 91 (e.g., 919876543210)')
+                return redirect('dashboard')
+            
+            logger.info(f"Making call to {phone_number}")
+            
+            # Create Twilio client
+            client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+            
+            # Make the call
+            call = client.calls.create(
+                url=f"{settings.PUBLIC_URL}/voice?q=0&name=there",
+                to=f"+{phone_number}",
+                from_=settings.TWILIO_PHONE_NUMBER
+            )
+            
+            logger.info(f"Call initiated: {call.sid}")
+            
+            # Try to create initial CallResponse record (optional)
+            try:
+                CallResponse.objects.create(
+                    call_sid=call.sid,
+                    phone_number=phone_number,
+                    call_status='initiated',
+                    question='Call initiated'
+                )
+                logger.info(f"CallResponse created for {call.sid}")
+            except Exception as db_error:
+                logger.warning(f"Failed to create CallResponse (continuing): {db_error}")
+                # Continue without database - call will still work
+            
+            messages.success(request, f'Call initiated to {phone_number}. Call SID: {call.sid}')
+            
+        except Exception as e:
+            logger.error(f"Error making call: {str(e)}")
+            messages.error(request, f'Error making call: {str(e)}')
         
-        # Create webhook URL using settings
-        webhook_url = f"{settings.PUBLIC_URL}/answer/"
-        
-        # Make the call
-        call = client.calls.create(
-            to=phone_number,
-            from_=settings.TWILIO_PHONE_NUMBER,
-            url=webhook_url,
-            record=True
-        )
-        
-        # Create initial call response record
-        CallResponse.objects.create(
-            phone_number=phone_number,
-            call_sid=call.sid,
-            call_status=call.status,
-            question="Call initiated"
-        )
-        
-        logger.info(f"Call initiated to {phone_number} with SID: {call.sid}")
-        messages.success(request, f"Call successfully initiated to {phone_number}")
         return redirect('dashboard')
-        
-    except Exception as e:
-        logger.error(f"Error making call: {str(e)}")
-        messages.error(request, f"Error making call: {str(e)}")
-        return redirect('dashboard')
+    
+    return redirect('dashboard')
 
 # Answer call with questions
 @csrf_exempt
@@ -262,133 +268,35 @@ def recording_status(request):
 
 # HR Dashboard
 def dashboard(request):
-    """Display dashboard with all responses"""
+    """Display dashboard with call data"""
     try:
-        logger.info("Dashboard view accessed")
-        
-        # Test database connection first
-        try:
-            from django.db import connection
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT 1")
-                logger.info("Database connection test successful")
-        except Exception as db_conn_error:
-            logger.error(f"Database connection failed: {db_conn_error}")
-            messages.error(request, f"Database connection error: {db_conn_error}")
-            return render(request, 'call/dashboard.html', {
-                'responses': [],
-                'total_responses': 0,
-                'total_recordings': 0,
-                'total_transcripts': 0,
-                'responses_by_call': {},
-                'transcript_stats': {'completed': 0, 'pending': 0, 'failed': 0},
-                'error': f"Database connection failed: {db_conn_error}"
-            })
-        
-        # Test if CallResponse table exists
-        try:
-            with connection.cursor() as cursor:
-                if 'sqlite' in settings.DATABASES['default']['ENGINE'].lower():
-                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='call_callresponse'")
-                else:
-                    cursor.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename='call_callresponse'")
-                
-                if not cursor.fetchone():
-                    logger.error("call_callresponse table does not exist")
-                    messages.error(request, "Database table 'call_callresponse' does not exist. Please run migrations.")
-                    return render(request, 'call/dashboard.html', {
-                        'responses': [],
-                        'total_responses': 0,
-                        'total_recordings': 0,
-                        'total_transcripts': 0,
-                        'responses_by_call': {},
-                        'transcript_stats': {'completed': 0, 'pending': 0, 'failed': 0},
-                        'error': "Database table 'call_callresponse' does not exist. Please run migrations."
-                    })
-                else:
-                    logger.info("call_callresponse table exists")
-        except Exception as table_check_error:
-            logger.error(f"Error checking table existence: {table_check_error}")
-            messages.error(request, f"Error checking database table: {table_check_error}")
-        
-        # Get all responses ordered by creation date
-        try:
-            responses = CallResponse.objects.all().order_by('-created_at')
-            logger.info(f"Successfully queried {responses.count()} responses")
-        except Exception as query_error:
-            logger.error(f"Error querying CallResponse: {query_error}")
-            messages.error(request, f"Error loading responses: {query_error}")
-            return render(request, 'call/dashboard.html', {
-                'responses': [],
-                'total_responses': 0,
-                'total_recordings': 0,
-                'total_transcripts': 0,
-                'responses_by_call': {},
-                'transcript_stats': {'completed': 0, 'pending': 0, 'failed': 0},
-                'error': f"Error loading responses: {query_error}"
-            })
-        
-        # Get transcript statistics
-        try:
-            transcript_stats = {
-                'completed': responses.filter(transcript_status='completed').count(),
-                'pending': responses.filter(transcript_status='pending').count(),
-                'failed': responses.filter(transcript_status='failed').count()
-            }
-            logger.info(f"Transcript stats: {transcript_stats}")
-        except Exception as stats_error:
-            logger.error(f"Error calculating transcript stats: {stats_error}")
-            transcript_stats = {'completed': 0, 'pending': 0, 'failed': 0}
-        
-        # Group responses by phone number and call
-        try:
-            responses_by_call = {}
-            for response in responses:
-                if response.call_sid not in responses_by_call:
-                    responses_by_call[response.call_sid] = {
-                        'phone_number': response.phone_number,
-                        'call_status': response.call_status,
-                        'call_duration': response.call_duration,
-                        'created_at': response.created_at,
-                        'responses': []
-                    }
-                responses_by_call[response.call_sid]['responses'].append({
-                    'question': response.question,
-                    'recording_url': response.recording_url,
-                    'recording_duration': response.recording_duration,
-                    'transcript': response.transcript,
-                    'transcript_status': response.transcript_status,
-                    'created_at': response.created_at
-                })
-            logger.info(f"Grouped responses into {len(responses_by_call)} calls")
-        except Exception as grouping_error:
-            logger.error(f"Error grouping responses: {grouping_error}")
-            responses_by_call = {}
+        # Try to get call responses from database
+        call_responses = CallResponse.objects.all().order_by('-created_at')
+        total_calls = call_responses.count()
+        completed_calls = call_responses.filter(call_status='completed').count()
+        in_progress_calls = call_responses.filter(call_status='in-progress').count()
         
         context = {
-            'responses': responses,
-            'total_responses': responses.count(),
-            'total_recordings': responses.exclude(recording_url__isnull=True).count(),
-            'total_transcripts': transcript_stats['completed'],
-            'responses_by_call': responses_by_call,
-            'transcript_stats': transcript_stats
+            'call_responses': call_responses,
+            'total_calls': total_calls,
+            'completed_calls': completed_calls,
+            'in_progress_calls': in_progress_calls,
+            'database_available': True,
         }
         
-        logger.info("Dashboard context prepared successfully")
-        return render(request, 'call/dashboard.html', context)
-        
     except Exception as e:
-        logger.error(f"Error in dashboard view: {str(e)}")
-        messages.error(request, f"Error loading dashboard: {str(e)}")
-        return render(request, 'call/dashboard.html', {
-            'responses': [],
-            'total_responses': 0,
-            'total_recordings': 0,
-            'total_transcripts': 0,
-            'responses_by_call': {},
-            'transcript_stats': {'completed': 0, 'pending': 0, 'failed': 0},
-            'error': f"Dashboard error: {str(e)}"
-        })
+        logger.error(f"Database error in dashboard: {e}")
+        # Show dashboard without database data
+        context = {
+            'call_responses': [],
+            'total_calls': 0,
+            'completed_calls': 0,
+            'in_progress_calls': 0,
+            'database_available': False,
+            'database_error': str(e),
+        }
+    
+    return render(request, 'call/dashboard.html', context)
 
 def index(request):
     """Render the main page"""
@@ -504,7 +412,7 @@ def export_to_excel(request):
 
 @csrf_exempt
 def voice(request):
-    """Handle voice response and ask questions - Simplified approach"""
+    """Handle voice response and ask questions - Database-independent approach"""
     try:
         # Get parameters from request
         q = int(request.GET.get("q", "0"))
@@ -543,7 +451,7 @@ def voice(request):
             # Get the current question (q-1 because q starts at 1)
             current_question = questions[q-1]
             
-            # Create or update CallResponse record
+            # Try to create CallResponse record (optional - won't break if it fails)
             try:
                 call_response, created = CallResponse.objects.get_or_create(
                     call_sid=call_sid,
@@ -555,18 +463,21 @@ def voice(request):
                 )
                 logger.info(f"CallResponse {'created' if created else 'updated'}: {call_response.id}")
             except Exception as db_error:
-                logger.error(f"Database error: {db_error}")
-                # Continue even if database fails
+                logger.warning(f"Database operation failed (continuing without DB): {db_error}")
+                # Continue without database - this won't break the call flow
             
             # If this is the last question
             if q == len(questions):
                 response.say(f"Thanks {name} for your answers. Goodbye!")
                 response.hangup()
                 
-                # Update call status to completed
-                if call_sid:
-                    CallResponse.objects.filter(call_sid=call_sid).update(call_status='completed')
-                    logger.info(f"Call {call_sid} completed")
+                # Try to update call status to completed (optional)
+                try:
+                    if call_sid:
+                        CallResponse.objects.filter(call_sid=call_sid).update(call_status='completed')
+                        logger.info(f"Call {call_sid} completed")
+                except Exception as db_error:
+                    logger.warning(f"Failed to update call status (continuing): {db_error}")
             else:
                 # Ask the current question
                 response.say(current_question, voice='Polly.Amy')
