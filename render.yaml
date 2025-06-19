@@ -4,10 +4,11 @@ services:
     env: python
     buildCommand: |
       pip install -r requirements.txt
-      echo "Running migrations..."
-      python manage.py migrate --verbosity=2
-      echo "Migrations completed!"
+      echo "=== Database Initialization ==="
+      python init_db.py
+      echo "=== Migration Status ==="
       python manage.py showmigrations
+      echo "=== Build Complete ==="
     startCommand: gunicorn hr_team.wsgi:application --bind 0.0.0.0:$PORT
     envVars:
       - key: PYTHON_VERSION
