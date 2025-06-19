@@ -1,18 +1,19 @@
 services:
   - type: web
-    name: hr-team
+    name: call-working
     env: python
     buildCommand: |
       pip install -r requirements.txt
-      echo "=== Comprehensive Database Debugging ==="
-      python debug_database.py
-      echo "=== Migration Status ==="
-      python manage.py showmigrations
-      echo "=== Build Complete ==="
-    startCommand: gunicorn hr_team.wsgi:application --bind 0.0.0.0:$PORT
+      python manage.py collectstatic --noinput
+      python init_database.py
+    startCommand: gunicorn hr_team.wsgi:application
     envVars:
       - key: PYTHON_VERSION
-        value: 3.9.0
+        value: 3.9.16
+      - key: DJANGO_SETTINGS_MODULE
+        value: hr_team.settings
+      - key: PUBLIC_URL
+        value: https://call-working.onrender.com
       - key: TWILIO_ACCOUNT_SID
         sync: false
       - key: TWILIO_AUTH_TOKEN
@@ -21,5 +22,7 @@ services:
         sync: false
       - key: SECRET_KEY
         generateValue: true
-      - key: WEB_CONCURRENCY
-        value: 4 
+      - key: DEBUG
+        value: False
+      - key: ALLOWED_HOSTS
+        value: call-working.onrender.com 

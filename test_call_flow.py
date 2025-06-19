@@ -57,7 +57,7 @@ def test_call_flow():
     
     # Test 3: Test URL generation
     try:
-        test_url = f"{settings.PUBLIC_URL}/voice?q=1&name=test"
+        test_url = f"{settings.PUBLIC_URL}/voice/?q=1&name=test"
         print(f"✓ URL generation works: {test_url}")
     except Exception as e:
         print(f"✗ Error generating URL: {e}")

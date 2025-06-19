@@ -124,7 +124,7 @@ def answer(request):
         
         # Create TwiML response - redirect to voice with q=0 to start
         resp = VoiceResponse()
-        redirect_url = f"{settings.PUBLIC_URL}/voice?q=0&name=there"
+        redirect_url = f"{settings.PUBLIC_URL}/voice/?q=0&name=there"
         logger.info(f"Redirecting call {call_sid} to: {redirect_url}")
         resp.redirect(redirect_url)
         
@@ -444,7 +444,7 @@ def voice(request):
         if q == 0:
             logger.info("Handling initial greeting (q=0)")
             response.say(f"Hello {name}, welcome to the HR interview. Let's begin.")
-            redirect_url = f"{settings.PUBLIC_URL}/voice?q=1&name={name}"
+            redirect_url = f"{settings.PUBLIC_URL}/voice/?q=1&name={name}"
             logger.info(f"Redirecting to: {redirect_url}")
             response.redirect(redirect_url)
             return HttpResponse(str(response), content_type="text/xml")
@@ -490,7 +490,7 @@ def voice(request):
                 response.say(current_question, voice='Polly.Amy')
                 
                 # Record the response
-                record_url = f"{settings.PUBLIC_URL}/voice?q={q+1}&name={name}"
+                record_url = f"{settings.PUBLIC_URL}/voice/?q={q+1}&name={name}"
                 logger.info(f"Recording action URL: {record_url}")
                 response.record(
                     action=record_url,
