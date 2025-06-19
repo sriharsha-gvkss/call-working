@@ -414,19 +414,28 @@ def export_to_excel(request):
 def voice(request):
     """Handle voice response and ask questions - Database-independent approach"""
     try:
+        # Log all request details for debugging
+        logger.info(f"Voice request method: {request.method}")
+        logger.info(f"Voice request GET params: {dict(request.GET)}")
+        logger.info(f"Voice request POST params: {dict(request.POST)}")
+        logger.info(f"Voice request headers: {dict(request.headers)}")
+        
         # Get parameters from request
         q = int(request.GET.get("q", "0"))
         name = request.GET.get("name", "there")
-        call_sid = request.POST.get('CallSid')
+        
+        # Get call details from POST data (if available)
+        call_sid = request.POST.get('CallSid', '')
         phone_number = request.POST.get('From', '')
         
-        logger.info(f"Voice route: q={q}, name={name}, call_sid={call_sid}")
+        logger.info(f"Voice route: q={q}, name={name}, call_sid={call_sid}, phone_number={phone_number}")
         
         # Load questions from JSON file
         try:
             questions_path = os.path.join(settings.BASE_DIR, "questions.json")
             with open(questions_path, "r", encoding="utf-8") as f:
                 questions = json.load(f)
+            logger.info(f"Loaded {len(questions)} questions from JSON file")
         except Exception as e:
             logger.error(f"Error loading questions: {e}")
             # Fallback questions
@@ -436,66 +445,85 @@ def voice(request):
                 "What was your previous job role?",
                 "Why do you want to join our company?"
             ]
+            logger.info(f"Using fallback questions: {len(questions)} questions")
         
         # Create TwiML response
         response = VoiceResponse()
         
         # Handle initial greeting
         if q == 0:
+            logger.info("Handling initial greeting (q=0)")
             response.say(f"Hello {name}, welcome to the HR interview. Let's begin.")
-            response.redirect(f"{settings.PUBLIC_URL}/voice?q=1&name={name}")
+            redirect_url = f"{settings.PUBLIC_URL}/voice?q=1&name={name}"
+            logger.info(f"Redirecting to: {redirect_url}")
+            response.redirect(redirect_url)
             return HttpResponse(str(response), content_type="text/xml")
         
         # Handle questions
-        if q <= len(questions):
+        if 1 <= q <= len(questions):
             # Get the current question (q-1 because q starts at 1)
             current_question = questions[q-1]
+            logger.info(f"Handling question {q}: {current_question}")
             
             # Try to create CallResponse record (optional - won't break if it fails)
-            try:
-                call_response, created = CallResponse.objects.get_or_create(
-                    call_sid=call_sid,
-                    question=current_question,
-                    defaults={
-                        'phone_number': phone_number,
-                        'call_status': 'in-progress'
-                    }
-                )
-                logger.info(f"CallResponse {'created' if created else 'updated'}: {call_response.id}")
-            except Exception as db_error:
-                logger.warning(f"Database operation failed (continuing without DB): {db_error}")
-                # Continue without database - this won't break the call flow
+            if call_sid:
+                try:
+                    call_response, created = CallResponse.objects.get_or_create(
+                        call_sid=call_sid,
+                        question=current_question,
+                        defaults={
+                            'phone_number': phone_number,
+                            'call_status': 'in-progress'
+                        }
+                    )
+                    logger.info(f"CallResponse {'created' if created else 'updated'}: {call_response.id}")
+                except Exception as db_error:
+                    logger.warning(f"Database operation failed (continuing without DB): {db_error}")
+                    # Continue without database - this won't break the call flow
             
             # If this is the last question
             if q == len(questions):
+                logger.info("Handling final question - ending call")
                 response.say(f"Thanks {name} for your answers. Goodbye!")
                 response.hangup()
                 
                 # Try to update call status to completed (optional)
-                try:
-                    if call_sid:
+                if call_sid:
+                    try:
                         CallResponse.objects.filter(call_sid=call_sid).update(call_status='completed')
                         logger.info(f"Call {call_sid} completed")
-                except Exception as db_error:
-                    logger.warning(f"Failed to update call status (continuing): {db_error}")
+                    except Exception as db_error:
+                        logger.warning(f"Failed to update call status (continuing): {db_error}")
             else:
                 # Ask the current question
+                logger.info(f"Asking question {q}: {current_question}")
                 response.say(current_question, voice='Polly.Amy')
                 
                 # Record the response
+                record_url = f"{settings.PUBLIC_URL}/voice?q={q+1}&name={name}"
+                logger.info(f"Recording action URL: {record_url}")
                 response.record(
-                    action=f"{settings.PUBLIC_URL}/voice?q={q+1}&name={name}",
+                    action=record_url,
                     maxLength='30',
                     playBeep=False,
                     trim='trim-silence'
                 )
                 
                 logger.info(f"Asked question {q}: {current_question}")
+        else:
+            # Invalid question number
+            logger.warning(f"Invalid question number: {q}")
+            response.say("Thank you for your time. Goodbye!")
+            response.hangup()
         
+        logger.info("Voice response generated successfully")
         return HttpResponse(str(response), content_type="text/xml")
         
     except Exception as e:
         logger.error(f"Error in voice view: {str(e)}")
+        logger.error(f"Exception type: {type(e).__name__}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         response = VoiceResponse()
         response.say("We're sorry, but there was an error processing your call. Please try again later.", voice='Polly.Amy')
         response.hangup()
