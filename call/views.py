@@ -71,7 +71,7 @@ def make_call(request):
             
             # Make the call
             call = client.calls.create(
-                url=f"{settings.PUBLIC_URL}/voice?q=0&name=there",
+                url=f"{settings.PUBLIC_URL}/answer/",
                 to=f"+{phone_number}",
                 from_=settings.TWILIO_PHONE_NUMBER
             )
@@ -107,6 +107,11 @@ def make_call(request):
 def answer(request):
     """Handle incoming call and start the interview"""
     try:
+        # Log all request details for debugging
+        logger.info(f"Answer request method: {request.method}")
+        logger.info(f"Answer request POST params: {dict(request.POST)}")
+        logger.info(f"Answer request headers: {dict(request.headers)}")
+        
         # Get the call SID from the request
         call_sid = request.POST.get('CallSid')
         if not call_sid:
@@ -114,38 +119,23 @@ def answer(request):
             return HttpResponse('No CallSid provided', status=400)
 
         # Get the phone number from the request
-        phone_number = request.POST.get('To', '')
+        phone_number = request.POST.get('From', '')
         logger.info(f"Received call from {phone_number} with SID: {call_sid}")
-        
-        # Initialize Twilio client
-        client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
-        
-        # Get call details
-        call = client.calls(call_sid).fetch()
-        logger.info(f"Call details retrieved: {call.status}")
-        
-        # Create initial call response record
-        try:
-            response = CallResponse.objects.create(
-                phone_number=phone_number,
-                call_sid=call_sid,
-                question="Call initiated",
-                call_status='in-progress'
-            )
-            logger.info(f"Created initial CallResponse record with ID: {response.id}")
-        except Exception as db_error:
-            logger.error(f"Database error creating CallResponse: {str(db_error)}")
-            # Continue even if database fails
         
         # Create TwiML response - redirect to voice with q=0 to start
         resp = VoiceResponse()
-        resp.redirect(f"{settings.PUBLIC_URL}/voice?q=0&name=there")
+        redirect_url = f"{settings.PUBLIC_URL}/voice?q=0&name=there"
+        logger.info(f"Redirecting call {call_sid} to: {redirect_url}")
+        resp.redirect(redirect_url)
         
         logger.info(f"Redirected call {call_sid} to voice interview")
         return HttpResponse(str(resp), content_type="text/xml")
         
     except Exception as e:
         logger.error(f"Error in answer view: {str(e)}")
+        logger.error(f"Exception type: {type(e).__name__}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         resp = VoiceResponse()
         resp.say("We're sorry, but there was an error processing your call. Please try again later.", voice='Polly.Amy')
         resp.hangup()

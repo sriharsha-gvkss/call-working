@@ -16,6 +16,6 @@ def make_call(to_number, question):
     call = client.calls.create(
         to=to_number,
         from_=twilio_phone,
-        url=f'https://YOUR_SERVER_URL/answer/?q={question}'
+        url=f'https://call-working.onrender.com/answer/?q={question}'
     )
     return call.sid 
